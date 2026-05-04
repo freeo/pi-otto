@@ -30,6 +30,7 @@ export async function runSmokeTest(
 
   checks.push(checkConfigParsed(config));
   checks.push(checkEntryPoint(config, cwd));
+  checks.push(checkRunLogDir(config, cwd));
   checks.push(await checkBashMonitor(monitorScript, cwd));
   checks.push(checkSqzCompatibility(monitorScript));
   checks.push(checkRateLimitDetection());
@@ -98,6 +99,17 @@ function checkEntryPoint(config: OttoConfig, cwd: string): SmokeCheck {
     const content = readFileSync(full, "utf-8");
     const lines = content.split("\n").length;
     return { passed: true, message: `${config.entryPoint} (${lines} lines)` };
+  });
+}
+
+function checkRunLogDir(config: OttoConfig, cwd: string): SmokeCheck {
+  return timed("Run log dir", () => {
+    const dir = config.runLog.replace(/\/[^/]+$/, "");
+    const full = resolve(cwd, dir);
+    if (!existsSync(full)) {
+      return { passed: false, message: `${dir} not found` };
+    }
+    return { passed: true, message: `${dir} found` };
   });
 }
 

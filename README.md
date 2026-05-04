@@ -7,7 +7,7 @@ Replaces bash orchestration scripts with a proper pi extension that runs inside 
 ## Install
 
 ```bash
-pi install git:freeo/pi-otto
+pi install git:github.com:freeo/pi-otto
 ```
 
 Or load directly without installing:
@@ -48,10 +48,10 @@ pi -p "/otto"
 
 ## Commands
 
-| Command | Purpose |
-|---------|---------|
-| `/otto` | Start plan execution. Runs preflight, boots servers, injects plan prompt. |
-| `/otto-check` | Smoke test. Exercises all components without starting execution. |
+| Command       | Purpose                                                                   |
+| ------------- | ------------------------------------------------------------------------- |
+| `/otto`       | Start plan execution. Runs preflight, boots servers, injects plan prompt. |
+| `/otto-check` | Smoke test. Exercises all components without starting execution.          |
 
 Both accept an optional config path argument: `/otto path/to/config.md`
 
@@ -103,8 +103,15 @@ Otto is a **harness**, not a brain. You (the LLM) drive the plan. Otto guards th
   "phase": "V0",
   "checks": [
     { "name": "type check", "command": "bun tsc --noEmit", "timeout": 120 },
-    { "name": "banned tokens", "command": "bun run scripts/lint/check-banned-tokens.ts" },
-    { "name": "gate V0", "command": "bun run scripts/gates/v0.ts", "expect_pattern": "PASS" }
+    {
+      "name": "banned tokens",
+      "command": "bun run scripts/lint/check-banned-tokens.ts"
+    },
+    {
+      "name": "gate V0",
+      "command": "bun run scripts/gates/v0.ts",
+      "expect_pattern": "PASS"
+    }
   ]
 }
 ```
