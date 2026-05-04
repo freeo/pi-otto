@@ -138,7 +138,7 @@ export default function (pi: ExtensionAPI) {
       const result = await runSmokeTest(config, cwd, MONITOR_SCRIPT, allTools);
       const report = formatSmokeReport(result);
 
-      pi.sendMessage(report);
+      pi.sendUserMessage(report);
     },
   });
 
@@ -244,7 +244,7 @@ Returns structured results per check. Use this to verify phase completion, run g
 
       // Use "error"/"blocker" keywords so context-mode classifies this as P2 (High)
       // and preserves it through compaction.
-      pi.sendMessage(
+      pi.sendUserMessage(
         `[OTTO ERROR — BLOCKER] Stall detected: ${stallStatus.reason}\n` +
         `Consecutive failures: ${stallStatus.consecutiveFailures}. ` +
         `Minutes since progress: ${Math.round(stallStatus.minutesSinceProgress)}.\n` +
@@ -257,7 +257,7 @@ Returns structured results per check. Use this to verify phase completion, run g
       await otto.rateLimit.handle(
         output,
         (model) => pi.setModel(model),
-        (msg) => pi.sendMessage(`[OTTO ERROR — CONSTRAINT] ${msg}`),
+        (msg) => pi.sendUserMessage(`[OTTO ERROR — CONSTRAINT] ${msg}`),
       );
     }
   });
@@ -271,7 +271,7 @@ Returns structured results per check. Use this to verify phase completion, run g
       await otto.rateLimit.handle(
         text,
         (model) => pi.setModel(model),
-        (msg) => pi.sendMessage(`[OTTO ERROR — CONSTRAINT] ${msg}`),
+        (msg) => pi.sendUserMessage(`[OTTO ERROR — CONSTRAINT] ${msg}`),
       );
     }
   });
@@ -290,7 +290,7 @@ Returns structured results per check. Use this to verify phase completion, run g
       otto.logger.error("Wall clock exceeded");
       otto.state.setExit("wall_clock_exceeded");
       otto.health.stopPeriodicCheck();
-      pi.sendMessage(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
+      pi.sendUserMessage(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
       ctx.shutdown?.();
       return;
     }
@@ -301,7 +301,7 @@ Returns structured results per check. Use this to verify phase completion, run g
       otto.logger.error("Iteration limit exceeded");
       otto.state.setExit("iteration_limit_exceeded");
       otto.health.stopPeriodicCheck();
-      pi.sendMessage(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
+      pi.sendUserMessage(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
       ctx.shutdown?.();
       return;
     }
