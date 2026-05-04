@@ -4,6 +4,7 @@ import type { OttoState, VerificationResult, RateLimitEntry, StallEntry, ServerS
 
 const EMPTY_STATE: OttoState = {
   iteration: 0,
+  turns: 0,
   startedAt: new Date().toISOString(),
   currentPhase: null,
   phasesCompleted: [],
@@ -31,7 +32,9 @@ export class StateManager {
     }
     try {
       const raw = readFileSync(this.filePath, "utf-8");
-      return JSON.parse(raw) as OttoState;
+      const parsed = JSON.parse(raw) as OttoState;
+      if (parsed.turns === undefined) parsed.turns = 0;
+      return parsed;
     } catch {
       return { ...EMPTY_STATE, startedAt: new Date().toISOString() };
     }
@@ -51,11 +54,22 @@ export class StateManager {
   }
 
   isRecovery(): boolean {
-    return this.state.iteration > 0 && this.state.exitReason === null;
+    if (this.state.iteration === 0) return false;
+    return this.state.exitReason === null || this.state.exitReason === "session_shutdown";
+  }
+
+  prepareForRecovery() {
+    this.state.exitReason = null;
+    this.save();
   }
 
   incrementIteration() {
     this.state.iteration++;
+    this.save();
+  }
+
+  incrementTurns() {
+    this.state.turns++;
     this.save();
   }
 
@@ -114,9 +128,9 @@ export class StateManager {
     const lines: string[] = [
       `[OTTO CRASH RECOVERY]`,
       `Previous run started: ${s.startedAt}`,
-      `Iterations completed: ${s.iteration}`,
+      `Iterations: ${s.iteration} | Turns: ${s.turns}`,
       `Phases completed: ${s.phasesCompleted.join(", ") || "none"}`,
-      `Current phase at crash: ${s.currentPhase || "unknown"}`,
+      `Current phase at interruption: ${s.currentPhase || "unknown"}`,
     ];
 
     if (s.lastVerification) {
@@ -135,7 +149,12 @@ export class StateManager {
       lines.push(`Last stall: ${last.description} — resolved: ${last.resolution}`);
     }
 
-    lines.push("", "Resume from where you left off. Do NOT re-execute completed phases.");
+    lines.push(
+      "",
+      "Resume from where you left off. Do NOT re-execute completed phases.",
+      "Read your run log to confirm which phases are actually complete.",
+      "Execute phases strictly one at a time — never batch or combine phases.",
+    );
     return lines.join("\n");
   }
 }

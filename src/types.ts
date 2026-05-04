@@ -34,6 +34,7 @@ export interface ServerConfig {
 
 export interface OttoState {
   iteration: number;
+  turns: number;
   startedAt: string;
   currentPhase: string | null;
   phasesCompleted: string[];
@@ -80,13 +81,3 @@ export interface ServerStateEntry {
   restarts: number;
 }
 
-export interface PreflightResult {
-  passed: boolean;
-  checks: PreflightCheck[];
-}
-
-export interface PreflightCheck {
-  name: string;
-  passed: boolean;
-  message: string;
-}

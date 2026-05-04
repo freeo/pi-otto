@@ -26,7 +26,10 @@ interface OttoRuntime {
   active: boolean;
   activeSubagents: number;
   lastEvent: string;
+  lastActivityAt: number;
+  inactivityInterval: ReturnType<typeof setInterval> | null;
   setWidget: (lines: string[]) => void;
+  notify: (msg: string) => void;
 }
 
 let otto: OttoRuntime | null = null;
@@ -34,6 +37,7 @@ let otto: OttoRuntime | null = null;
 function setActivity(event: string) {
   if (!otto) return;
   otto.lastEvent = event;
+  otto.lastActivityAt = Date.now();
   otto.logger.info(event);
   refreshWidget();
 }
@@ -49,7 +53,7 @@ function refreshWidget() {
 
   const line1Parts = [
     "otto",
-    `iter ${s.iteration}/${otto.config.maxIterations}`,
+    `turn ${s.turns}`,
     clock.elapsed,
     `phase: ${phase}`,
     `done: ${done}`,
@@ -68,11 +72,48 @@ function refreshWidget() {
   otto.setWidget(lines);
 }
 
+function startInactivityWatchdog() {
+  if (!otto) return;
+  const thresholdMs = otto.config.stallThresholdMinutes * 60_000;
+  const checkIntervalMs = 60_000;
+
+  otto.inactivityInterval = setInterval(() => {
+    if (!otto?.active) return;
+    const elapsed = Date.now() - otto.lastActivityAt;
+    if (elapsed < thresholdMs) return;
+
+    const minutes = Math.round(elapsed / 60_000);
+    otto.logger.warn(`Inactivity detected: ${minutes}m since last activity`);
+    otto.state.addStall({
+      timestamp: new Date().toISOString(),
+      description: `No activity for ${minutes} minutes`,
+      resolution: "injecting inactivity recovery prompt",
+    });
+    otto.lastActivityAt = Date.now();
+    setActivity(`INACTIVITY: ${minutes}m — injecting recovery`);
+
+    otto.notify(
+      `[OTTO ERROR — BLOCKER] Inactivity detected: no tool calls for ${minutes} minutes.\n` +
+      `The session appears stuck. Take action now:\n` +
+      `1. If waiting on something, state what and why.\n` +
+      `2. If planning, execute — do not think without acting.\n` +
+      `3. If blocked, describe the blocker and try a different approach.\n` +
+      `Execute phases strictly one at a time. Never batch or combine phases.`,
+    );
+  }, checkIntervalMs);
+}
+
+function stopInactivityWatchdog() {
+  if (otto?.inactivityInterval) {
+    clearInterval(otto.inactivityInterval);
+    otto.inactivityInterval = null;
+  }
+}
+
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const MONITOR_SCRIPT = resolve(PKG_ROOT, "bin", "bash-monitor.ts");
 
 export default function (pi: ExtensionAPI) {
-  // --- /otto command ---
   pi.registerCommand("otto", {
     description: "Start Otto orchestration — reads OTTO_CONFIG.md, validates, and begins plan execution",
     args: [
@@ -104,7 +145,8 @@ export default function (pi: ExtensionAPI) {
       const logger = new OttoLogger(stateDir);
       const state = new StateManager(stateDir);
 
-      logger.info("Otto starting", { configPath, recovery: state.isRecovery() });
+      const isRecovery = state.isRecovery();
+      logger.info("Otto starting", { configPath, recovery: isRecovery });
 
       const allTools = pi.getAllTools().map((t: { name: string }) => t.name);
       const checks = await runSmokeTest(config, cwd, MONITOR_SCRIPT, allTools);
@@ -124,36 +166,43 @@ export default function (pi: ExtensionAPI) {
       const progress = createProgressTracker(config, state, logger, bashGuard);
       const health = createHealthWatchdog(config, state, logger, cwd);
       const setWidgetFn = (lines: string[]) => ctx.ui?.setWidget?.("otto", lines);
+      const notifyFn = (msg: string) => pi.sendUserMessage(msg);
 
       otto = {
         config, state, logger, rateLimit, bashGuard, stallDetector, progress, health,
         active: true, activeSubagents: 0, lastEvent: "initializing",
-        setWidget: setWidgetFn,
+        lastActivityAt: Date.now(), inactivityInterval: null,
+        setWidget: setWidgetFn, notify: notifyFn,
       };
 
       health.startPeriodicCheck(config.healthCheckInterval * 1000);
+      startInactivityWatchdog();
       refreshWidget();
 
       const entryContent = readFileSync(resolve(cwd, config.entryPoint), "utf-8");
       let prompt = entryContent;
 
-      if (state.isRecovery()) {
+      if (isRecovery) {
         const recovery = state.buildRecoveryContext();
         prompt = `${recovery}\n\n---\n\n${entryContent}`;
+        state.prepareForRecovery();
         setActivity("crash recovery context injected");
       }
 
       state.incrementIteration();
 
-      const mode = state.isRecovery() ? "recovery" : "fresh start";
-      ctx.ui.notify(`Otto: ${mode}, iteration ${state.get().iteration}. Dispatching plan prompt...`, "info");
+      const mode = isRecovery ? "recovery" : "fresh start";
+      const s = state.get();
+      ctx.ui.notify(
+        `Otto: ${mode}, iteration ${s.iteration}, ${s.phasesCompleted.length} phases previously completed. Dispatching plan...`,
+        "info",
+      );
       setActivity("plan prompt dispatched");
 
       pi.sendUserMessage(prompt);
     },
   });
 
-  // --- /otto-check command (smoke test) ---
   pi.registerCommand("otto-check", {
     description: "Run Otto smoke test — exercises all components without starting plan execution",
     args: [
@@ -187,7 +236,6 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // --- verification_check tool ---
   pi.registerTool({
     name: "verification_check",
     description: `Run plan-defined verification checks. Each check is a shell command with pass/fail criteria.
@@ -202,10 +250,20 @@ Returns structured results per check. Use this to verify phase completion, run g
         };
       }
 
+      otto.state.setPhase(params.phase);
+      setActivity(`verification: ${params.phase} (${params.checks.length} checks)`);
       onUpdate?.({ content: [{ type: "text", text: `Running ${params.checks.length} checks for ${params.phase}...` }] });
 
       const result = await runVerification(params, otto.config.verificationTimeout, otto.logger, otto.state, ctx.cwd, signal);
       const formatted = formatVerificationResult(result);
+
+      if (result.allPassed) {
+        otto.state.completePhase(params.phase);
+        setActivity(`verification PASSED: ${params.phase} — phase complete`);
+      } else {
+        const failed = result.checks.filter((c) => !c.passed).map((c) => c.name);
+        setActivity(`verification FAILED: ${params.phase} — ${failed.join(", ")}`);
+      }
 
       return {
         content: [{ type: "text", text: formatted }],
@@ -216,9 +274,6 @@ Returns structured results per check. Use this to verify phase completion, run g
 
   // --- Event handlers ---
 
-  // Bash guard: wrap commands with monitor (output staleness + hard timeout).
-  // Uses event.input.command (pi's actual property name, matching pi-sqz pattern).
-  // Mutates directly — sqz does the same, handlers chain by mutation order.
   pi.on("tool_call", async (event: any, ctx: any) => {
     if (!otto?.active) return;
     if (event.tool !== "bash" || !event.input?.command) return;
@@ -233,9 +288,6 @@ Returns structured results per check. Use this to verify phase completion, run g
     setActivity(`bash: ${original.slice(0, 80)}`);
   });
 
-  // Guard ctx_execute and ctx_batch_execute (context-mode tools that bypass bash).
-  // These run shell commands in sandboxed subprocesses — without guarding, LLM can
-  // run unbounded commands through context-mode instead of bash.
   pi.on("tool_call", async (event: any, ctx: any) => {
     if (!otto?.active) return;
     if (event.tool !== "ctx_execute" && event.tool !== "ctx_batch_execute") return;
@@ -289,11 +341,12 @@ Returns structured results per check. Use this to verify phase completion, run g
       otto.stallDetector.reset();
       setActivity(`STALL detected: ${stallStatus.reason?.slice(0, 60)}`);
 
-      pi.sendUserMessage(
+      otto.notify(
         `[OTTO ERROR — BLOCKER] Stall detected: ${stallStatus.reason}\n` +
         `Consecutive failures: ${stallStatus.consecutiveFailures}. ` +
         `Minutes since progress: ${Math.round(stallStatus.minutesSinceProgress)}.\n` +
-        `This is a blocking error. Reassess your current approach. Try a different strategy.`,
+        `This is a blocking error. Reassess your current approach. Try a different strategy.\n` +
+        `Execute phases strictly one at a time. Never batch or combine phases.`,
       );
     }
 
@@ -302,7 +355,7 @@ Returns structured results per check. Use this to verify phase completion, run g
       await otto.rateLimit.handle(
         output,
         (model) => pi.setModel(model),
-        (msg) => pi.sendUserMessage(`[OTTO ERROR — CONSTRAINT] ${msg}`),
+        (msg) => otto!.notify(`[OTTO ERROR — CONSTRAINT] ${msg}`),
       );
     }
   });
@@ -316,7 +369,7 @@ Returns structured results per check. Use this to verify phase completion, run g
       await otto.rateLimit.handle(
         text,
         (model) => pi.setModel(model),
-        (msg) => pi.sendUserMessage(`[OTTO ERROR — CONSTRAINT] ${msg}`),
+        (msg) => otto!.notify(`[OTTO ERROR — CONSTRAINT] ${msg}`),
       );
     }
   });
@@ -324,6 +377,7 @@ Returns structured results per check. Use this to verify phase completion, run g
   pi.on("turn_end", async (event: any, ctx: any) => {
     if (!otto?.active) return;
 
+    otto.state.incrementTurns();
     otto.progress.onTurnEnd();
     refreshWidget();
 
@@ -333,7 +387,8 @@ Returns structured results per check. Use this to verify phase completion, run g
       setActivity("SHUTDOWN: wall clock exceeded");
       otto.state.setExit("wall_clock_exceeded");
       otto.health.stopPeriodicCheck();
-      pi.sendUserMessage(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
+      stopInactivityWatchdog();
+      otto.notify(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
       ctx.shutdown?.();
       return;
     }
@@ -344,7 +399,8 @@ Returns structured results per check. Use this to verify phase completion, run g
       setActivity("SHUTDOWN: iteration limit exceeded");
       otto.state.setExit("iteration_limit_exceeded");
       otto.health.stopPeriodicCheck();
-      pi.sendUserMessage(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
+      stopInactivityWatchdog();
+      otto.notify(`[OTTO ERROR — BLOCKER] ${summary}\nGracefully shutting down.`);
       ctx.shutdown?.();
       return;
     }
@@ -369,10 +425,10 @@ Returns structured results per check. Use this to verify phase completion, run g
     }
   });
 
-  // Session shutdown: exit summary
   pi.on("session_shutdown", async (event: any, ctx: any) => {
     if (!otto) return;
     otto.health.stopPeriodicCheck();
+    stopInactivityWatchdog();
     if (!otto.state.get().exitReason) {
       otto.state.setExit("session_shutdown");
     }
@@ -380,7 +436,6 @@ Returns structured results per check. Use this to verify phase completion, run g
     otto.logger.info(summary);
   });
 
-  // Session start: detect recovery
   pi.on("session_start", async (event: any, ctx: any) => {
     if (event.reason === "resume" && otto) {
       otto.logger.info("Session resumed — crash recovery context available via /otto");
