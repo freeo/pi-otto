@@ -138,7 +138,7 @@ export default function (pi: ExtensionAPI) {
       const result = await runSmokeTest(config, cwd, MONITOR_SCRIPT, allTools);
       const report = formatSmokeReport(result);
 
-      pi.sendUserMessage(report);
+      ctx.ui.notify(report, result.passed ? "info" : "error");
     },
   });
 
