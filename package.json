@@ -1,0 +1,25 @@
+{
+  "name": "pi-otto",
+  "version": "0.1.0",
+  "description": "Otto — orchestration harness for pi-coding-agent plan execution",
+  "author": "freeo",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-coding-agent",
+    "orchestration"
+  ],
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "files": [
+    "extensions/",
+    "src/",
+    "bin/",
+    "templates/"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  }
+}

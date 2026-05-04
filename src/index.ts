@@ -29,8 +29,8 @@ interface OttoRuntime {
 
 let otto: OttoRuntime | null = null;
 
-const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
-const MONITOR_SCRIPT = resolve(EXTENSION_DIR, "bash-monitor.ts");
+const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const MONITOR_SCRIPT = resolve(PKG_ROOT, "bin", "bash-monitor.ts");
 
 export default function (pi: ExtensionAPI) {
   // --- /otto command ---
