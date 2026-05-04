@@ -102,7 +102,7 @@ export function sleep(ms: number): Promise<void> {
 }
 
 const RATE_LIMIT_PATTERNS = [
-  /429/i,
+  /(?:error|status|http|code)\s*:?\s*429\b/i,
   /rate.?limit/i,
   /quota.?exceed/i,
   /too.?many.?requests/i,

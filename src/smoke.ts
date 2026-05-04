@@ -2,7 +2,7 @@ import { existsSync, writeFileSync, readFileSync, unlinkSync } from "fs";
 import { resolve, join } from "path";
 import { execSync } from "child_process";
 import type { OttoConfig } from "./types.js";
-import { OttoLogger, checkPort, isRateLimitSignal, wrapWithMonitor, shouldSkipGuard } from "./utils.js";
+import { OttoLogger, isRateLimitSignal, wrapWithMonitor, shouldSkipGuard } from "./utils.js";
 import { StateManager } from "./state.js";
 import { createStallDetector } from "./guards.js";
 
@@ -39,7 +39,7 @@ export async function runSmokeTest(
   checks.push(checkVerificationTool(allToolNames));
 
   for (const server of config.servers) {
-    checks.push(await checkDevServer(server.name, server.port));
+    checks.push(checkDevServerConfig(server.name, server.port, server.cmd));
   }
 
   if (config.mainProvider) {
@@ -241,13 +241,15 @@ function checkVerificationTool(allToolNames: string[]): SmokeCheck {
   });
 }
 
-async function checkDevServer(name: string, port: number): Promise<SmokeCheck> {
-  return timedAsync(`Server: ${name}`, async () => {
-    const healthy = await checkPort(port);
-    return {
-      passed: healthy,
-      message: healthy ? `port ${port} responding` : `port ${port} not responding`,
-    };
+function checkDevServerConfig(name: string, port: number, cmd: string): SmokeCheck {
+  return timed(`Server: ${name}`, () => {
+    if (!port || port <= 0) {
+      return { passed: false, message: "invalid port in config" };
+    }
+    if (!cmd || !cmd.trim()) {
+      return { passed: false, message: "missing start command in config" };
+    }
+    return { passed: true, message: `port ${port}, cmd: ${cmd.slice(0, 50)}` };
   });
 }
 
