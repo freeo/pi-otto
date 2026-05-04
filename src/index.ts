@@ -39,7 +39,7 @@ export default function (pi: ExtensionAPI) {
     args: [
       { name: "config", description: "Path to OTTO_CONFIG.md (default: planning/OTTO_CONFIG.md)", required: false },
     ],
-    async execute(args: any, ctx: any) {
+    async handler(args: any, ctx: any) {
       const cwd = ctx.cwd;
       const configPath = (typeof args === "string" ? args.trim() : args?.config) || "planning/OTTO_CONFIG.md";
       const fullConfigPath = resolve(cwd, configPath);
@@ -114,7 +114,7 @@ export default function (pi: ExtensionAPI) {
     args: [
       { name: "config", description: "Path to OTTO_CONFIG.md (default: planning/OTTO_CONFIG.md)", required: false },
     ],
-    async execute(args: any, ctx: any) {
+    async handler(args: any, ctx: any) {
       const cwd = ctx.cwd;
       const configPath = (typeof args === "string" ? args.trim() : args?.config) || "planning/OTTO_CONFIG.md";
       const fullConfigPath = resolve(cwd, configPath);
